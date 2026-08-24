@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -31,12 +33,55 @@ func main() {
 	}
 	defer db.Close()
 
-	// Инициализация Telegram клиента
-	tgToken := os.Getenv("TELEGRAM_BOT_TOKEN")
-	if tgToken == "" {
-		log.Fatal("TELEGRAM_BOT_TOKEN environment variable is not set")
+	// Инициализация Telegram клиента через MTProto
+	appIDStr := os.Getenv("TELEGRAM_APP_ID")
+	if appIDStr == "" {
+		log.Fatal("TELEGRAM_APP_ID environment variable is not set")
 	}
-	tgClient, err := telegram.NewClient(tgToken, fileLogger)
+	appID, err := strconv.Atoi(appIDStr)
+	if err != nil {
+		log.Fatalf("Invalid TELEGRAM_APP_ID: %v", err)
+	}
+
+	appHash := os.Getenv("TELEGRAM_APP_HASH")
+	if appHash == "" {
+		log.Fatal("TELEGRAM_APP_HASH environment variable is not set")
+	}
+
+	proxyHost := os.Getenv("MT_PROXY_HOST")
+	if proxyHost == "" {
+		log.Fatal("MT_PROXY_HOST environment variable is not set")
+	}
+
+	proxyPortStr := os.Getenv("MT_PROXY_PORT")
+	if proxyPortStr == "" {
+		log.Fatal("MT_PROXY_PORT environment variable is not set")
+	}
+	proxyPort, err := strconv.Atoi(proxyPortStr)
+	if err != nil {
+		log.Fatalf("Invalid MT_PROXY_PORT: %v", err)
+	}
+
+	proxySecret := os.Getenv("MT_PROXY_SECRET")
+	if proxySecret == "" {
+		log.Fatal("MT_PROXY_SECRET environment variable is not set")
+	}
+
+	sessionPath := os.Getenv("SESSION_PATH")
+	if sessionPath == "" {
+		sessionPath = "data/session.json"
+	}
+
+	tgConfig := telegram.Config{
+		AppID:       appID,
+		AppHash:     appHash,
+		ProxyHost:   proxyHost,
+		ProxyPort:   proxyPort,
+		ProxySecret: proxySecret,
+		SessionPath: sessionPath,
+	}
+
+	tgClient, err := telegram.NewClient(tgConfig, fileLogger)
 	if err != nil {
 		fileLogger.Error("Failed to initialize Telegram client", "error", err)
 		log.Fatalf("Telegram client initialization failed: %v", err)
@@ -59,7 +104,9 @@ func main() {
 
 	fileLogger.Info("Worker started", 
 		"poll_interval", pollInterval.String(),
-		"log_path", logPath)
+		"log_path", logPath,
+		"proxy_host", proxyHost,
+		"proxy_port", proxyPort)
 
 	// Обработка сигналов для graceful shutdown
 	sigChan := make(chan os.Signal, 1)
@@ -68,19 +115,23 @@ func main() {
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	// Основной цикл работы
 	for {
 		select {
 		case <-ticker.C:
-			processTasks(db, tgClient, bitrixClient, fileLogger)
+			processTasks(ctx, db, tgClient, bitrixClient, fileLogger)
 		case sig := <-sigChan:
 			fileLogger.Info("Shutdown signal received", "signal", sig.String())
+			cancel()
 			return
 		}
 	}
 }
 
-func processTasks(db *database.DB, tgClient *telegram.Client, bitrixClient *bitrix.Client, logger *logger.FileLogger) {
+func processTasks(ctx context.Context, db *database.DB, tgClient *telegram.Client, bitrixClient *bitrix.Client, logger *logger.FileLogger) {
 	tasks, err := db.GetPendingTasks()
 	if err != nil {
 		logger.Error("Failed to get pending tasks", "error", err)
@@ -97,18 +148,29 @@ func processTasks(db *database.DB, tgClient *telegram.Client, bitrixClient *bitr
 	failCount := 0
 
 	for _, task := range tasks {
-		err := tgClient.SendMessage(task.ChatID, task.Message)
+		userID, err := strconv.ParseInt(task.ChatID, 10, 64)
+		if err != nil {
+			logger.Error("Invalid user ID", 
+				"task_id", task.ID,
+				"chat_id", task.ChatID,
+				"error", err)
+			failCount++
+			db.MarkTaskFailed(task.ID, err.Error())
+			continue
+		}
+
+		err = tgClient.SendMessage(ctx, userID, task.Message)
 		if err != nil {
 			logger.Error("Failed to send message", 
 				"task_id", task.ID,
-				"chat_id", task.ChatID,
+				"user_id", userID,
 				"error", err)
 			failCount++
 			db.MarkTaskFailed(task.ID, err.Error())
 		} else {
 			logger.Info("Message sent successfully",
 				"task_id", task.ID,
-				"chat_id", task.ChatID)
+				"user_id", userID)
 			successCount++
 			db.MarkTaskCompleted(task.ID)
 		}

@@ -1,15 +1,21 @@
 package telegram
 
 import (
+	"context"
 	"fmt"
-	"strconv"
+	"time"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/gotd/td/session"
+	"github.com/gotd/td/tg"
+	"github.com/gotd/td/telegram"
+	"github.com/gotd/td/telegram/dcs"
 )
 
 type Client struct {
-	bot    *tgbotapi.BotAPI
+	client *tg.Client
 	logger Logger
+	appID  int
+	appHash string
 }
 
 type Logger interface {
@@ -17,33 +23,67 @@ type Logger interface {
 	Error(msg string, fields ...interface{})
 }
 
-func NewClient(token string, logger Logger) (*Client, error) {
-	bot, err := tgbotapi.NewBotAPI(token)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create telegram bot: %w", err)
+type Config struct {
+	AppID     int
+	AppHash   string
+	ProxyHost string
+	ProxyPort int
+	ProxySecret string
+	SessionPath string
+}
+
+func NewClient(cfg Config, logger Logger) (*Client, error) {
+	// Создаем хранилище сессии
+	sessionStorage := &session.FileStorage{
+		Path: cfg.SessionPath,
 	}
 
-	logger.Info("Telegram bot authorized", "username", bot.Self.UserName)
+	// Создаем MTProxy resolver
+	proxyAddr := fmt.Sprintf("%s:%d", cfg.ProxyHost, cfg.ProxyPort)
+	resolver, err := dcs.MTProxy(proxyAddr, []byte(cfg.ProxySecret), dcs.MTProxyOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create MTProxy resolver: %w", err)
+	}
+
+	opts := telegram.Options{
+		Resolver:       resolver,
+		SessionStorage: sessionStorage,
+		DialTimeout:    10 * time.Second,
+		RetryInterval:  5 * time.Second,
+		MaxRetries:     5,
+	}
+
+	client := telegram.NewClient(cfg.AppID, cfg.AppHash, opts)
 
 	return &Client{
-		bot:    bot,
+		client: client,
 		logger: logger,
+		appID:  cfg.AppID,
+		appHash: cfg.AppHash,
 	}, nil
 }
 
-func (c *Client) SendMessage(chatID string, message string) error {
-	chatIDInt, err := strconv.ParseInt(chatID, 10, 64)
+func (c *Client) Run(ctx context.Context, f func(ctx context.Context, client *tg.Client) error) error {
+	return c.client.Run(ctx, f)
+}
+
+func (c *Client) SendMessage(ctx context.Context, userID int64, message string) error {
+	err := c.client.Run(ctx, func(ctx context.Context, api *tg.Client) error {
+		// Отправляем сообщение пользователю по user_id
+		_, err := api.MessagesSendMessage(ctx, &tg.MessagesSendMessageRequest{
+			Peer:    &tg.InputPeerUser{UserID: userID},
+			Message: message,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to send message to user %d: %w", userID, err)
+		}
+		return nil
+	})
+	
 	if err != nil {
-		return fmt.Errorf("invalid chat ID: %w", err)
+		return err
 	}
 
-	msg := tgbotapi.NewMessage(chatIDInt, message)
-	msg.ParseMode = "HTML"
-
-	_, err = c.bot.Send(msg)
-	if err != nil {
-		return fmt.Errorf("failed to send message: %w", err)
-	}
-
+	c.logger.Info("Message sent successfully", "user_id", userID)
 	return nil
 }
