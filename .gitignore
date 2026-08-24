@@ -1,5 +1,5 @@
 ```
-# Binaries
+# Go binaries
 *.exe
 *.dll
 *.so
@@ -8,21 +8,22 @@
 *.obj
 *.out
 
-# Go specific
-*.test
-*.prof
-cover.out
+# Go build artifacts
+bin/
+_dist/
+_build/
 
 # Dependencies
 vendor/
 
-# Logs
+# Logs and temp files
 *.log
+*.tmp
 
 # Environment
 .env
 .env.local
-*.env.*
+.env.*
 
 # Editors
 .vscode/
@@ -30,32 +31,11 @@ vendor/
 *.swp
 *.swo
 
-# Build artifacts
-build/
-dist/
-target/
+# Coverage
+coverage/
+htmlcov/
+.coverage
 
-# Compressed files
-*.zip
-*.gz
-*.tar
-*.tgz
-*.bz2
-*.xz
-*.7z
-*.rar
-*.zst
-*.lz4
-*.lzh
-*.cab
-*.arj
-*.rpm
-*.deb
-*.Z
-*.lz
-*.lzo
-*.tar.gz
-*.tar.bz2
-*.tar.xz
-*.tar.zst
+# Database (if temporary/build-related)
+*.db-journal
 ```
