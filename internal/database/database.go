@@ -3,8 +3,6 @@ package database
 import (
 	"database/sql"
 	"time"
-
-	_ "github.com/mattn/go-sqlite3"
 )
 
 type Task struct {

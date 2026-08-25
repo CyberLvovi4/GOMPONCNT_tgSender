@@ -6,16 +6,16 @@ import (
 	"time"
 
 	"github.com/gotd/td/session"
-	"github.com/gotd/td/tg"
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/telegram/dcs"
+	"github.com/gotd/td/tg"
 )
 
 type Client struct {
-	client *tg.Client
-	logger Logger
-	appID  int
-	appHash string
+	telegramClient *telegram.Client
+	logger         Logger
+	appID          int
+	appHash        string
 }
 
 type Logger interface {
@@ -24,10 +24,10 @@ type Logger interface {
 }
 
 type Config struct {
-	AppID     int
-	AppHash   string
-	ProxyHost string
-	ProxyPort int
+	AppID       int
+	AppHash     string
+	ProxyHost   string
+	ProxyPort   int
 	ProxySecret string
 	SessionPath string
 }
@@ -56,20 +56,19 @@ func NewClient(cfg Config, logger Logger) (*Client, error) {
 	client := telegram.NewClient(cfg.AppID, cfg.AppHash, opts)
 
 	return &Client{
-		client: client,
-		logger: logger,
-		appID:  cfg.AppID,
-		appHash: cfg.AppHash,
+		telegramClient: client,
+		logger:         logger,
+		appID:          cfg.AppID,
+		appHash:        cfg.AppHash,
 	}, nil
 }
 
 func (c *Client) Run(ctx context.Context, f func(ctx context.Context, client *tg.Client) error) error {
-	return c.client.Run(ctx, f)
+	return c.telegramClient.Run(ctx, f)
 }
 
 func (c *Client) SendMessage(ctx context.Context, userID int64, message string) error {
-	err := c.client.Run(ctx, func(ctx context.Context, api *tg.Client) error {
-		// Отправляем сообщение пользователю по user_id
+	err := c.telegramClient.Run(ctx, func(ctx context.Context, api *tg.Client) error {
 		_, err := api.MessagesSendMessage(ctx, &tg.MessagesSendMessageRequest{
 			Peer:    &tg.InputPeerUser{UserID: userID},
 			Message: message,
@@ -79,7 +78,7 @@ func (c *Client) SendMessage(ctx context.Context, userID int64, message string) 
 		}
 		return nil
 	})
-	
+
 	if err != nil {
 		return err
 	}
