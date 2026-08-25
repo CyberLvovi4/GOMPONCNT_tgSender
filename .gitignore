@@ -1,17 +1,17 @@
 ```
-# Go binaries
+# Go build artifacts
+*.o
+*.a
+*.so
 *.exe
 *.dll
-*.so
-*.a
-*.o
-*.obj
 *.out
 
-# Go build artifacts
-bin/
-_dist/
-_build/
+# Go cache directories
+go/pkg/mod/
+go/build/
+*.mod
+*.sum
 
 # Dependencies
 vendor/
@@ -23,7 +23,7 @@ vendor/
 # Environment
 .env
 .env.local
-.env.*
+*.env.*
 
 # Editors
 .vscode/
@@ -31,11 +31,17 @@ vendor/
 *.swp
 *.swo
 
+# OS
+.DS_Store
+Thumbs.db
+
 # Coverage
 coverage/
 htmlcov/
 .coverage
 
-# Database (if temporary/build-related)
-*.db-journal
+# Build directories
+dist/
+build/
+target/
 ```
