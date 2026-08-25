@@ -3,45 +3,56 @@
 *.o
 *.a
 *.so
-*.exe
+*.dylib
 *.dll
+*.exe
 *.out
 
-# Go cache directories
-go/pkg/mod/
-go/build/
-*.mod
-*.sum
+# Go cache and build directories
+.cache/
+_coverprofile.out
+_coverage.out
+go-allocation.txt
+go-call-graph.dot
+go-test-report.html
+go-test-report.json
+go-vet-report.txt
+gotestmain.go
+test.out
+*.test
+_coverage.*
 
 # Dependencies
 vendor/
 
-# Logs and temp files
+# Logs and temporary files
 *.log
 *.tmp
+*.swp
 
-# Environment
+# Environment variables
 .env
 .env.local
 *.env.*
 
-# Editors
+# Coverage and test artifacts
+.coverage
+coverage/
+htmlcov/
+.coverprofile
+.profile_cpu
+.profile_mem
+.profile_block
+.profile_mutex
+.profile_threadcreate
+
+# IDE specific
 .vscode/
 .idea/
 *.swp
 *.swo
 
-# OS
+# OS generated files
 .DS_Store
 Thumbs.db
-
-# Coverage
-coverage/
-htmlcov/
-.coverage
-
-# Build directories
-dist/
-build/
-target/
 ```
