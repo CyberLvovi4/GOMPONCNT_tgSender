@@ -35,13 +35,13 @@ func (l *FileLogger) Close() error {
 	return l.file.Close()
 }
 
-func (l *FileLogger) writeLog(level, message string, fields ...interface{}) {
+func (l *FileLogger) writeLog(level, message string, fields ...any) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
 	timestamp := time.Now().Format(time.RFC3339)
-	
-	logEntry := map[string]interface{}{
+
+	logEntry := map[string]any{
 		"timestamp": timestamp,
 		"level":     level,
 		"message":   message,
@@ -66,18 +66,18 @@ func (l *FileLogger) writeLog(level, message string, fields ...interface{}) {
 	fmt.Fprintln(l.file, string(jsonData))
 }
 
-func (l *FileLogger) Info(msg string, fields ...interface{}) {
+func (l *FileLogger) Info(msg string, fields ...any) {
 	l.writeLog("INFO", msg, fields...)
 }
 
-func (l *FileLogger) Error(msg string, fields ...interface{}) {
+func (l *FileLogger) Error(msg string, fields ...any) {
 	l.writeLog("ERROR", msg, fields...)
 }
 
-func (l *FileLogger) Debug(msg string, fields ...interface{}) {
+func (l *FileLogger) Debug(msg string, fields ...any) {
 	l.writeLog("DEBUG", msg, fields...)
 }
 
-func (l *FileLogger) Warn(msg string, fields ...interface{}) {
+func (l *FileLogger) Warn(msg string, fields ...any) {
 	l.writeLog("WARN", msg, fields...)
 }
