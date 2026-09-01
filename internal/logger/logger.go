@@ -1,83 +1,66 @@
 package logger
 
 import (
-	"encoding/json"
 	"fmt"
+	"io"
+	"log"
 	"os"
-	"sync"
+	"path/filepath"
+	"runtime"
+	"syscall"
 	"time"
 )
 
-type FileLogger struct {
-	file   *os.File
-	mu     sync.Mutex
-	prefix string
-}
-
-func NewFileLogger(logPath string) (*FileLogger, error) {
-	// Создаём директорию для логов если её нет
-	if err := os.MkdirAll("logs", 0755); err != nil {
-		return nil, fmt.Errorf("failed to create logs directory: %w", err)
+// Setup инициализирует логгер с дублированием в файл и консоль.
+// Возвращает функцию закрытия файла (вызвать через defer).
+func Setup(logDir string) (cleanup func(), err error) {
+	// 1. Создаем директорию для логов, если её нет
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		return nil, fmt.Errorf("не удалось создать директорию логов: %w", err)
 	}
 
-	file, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	// 2. Формируем имя файла с датой: logs/sender_2026-09-01.log
+	dateStr := time.Now().Format("2006-01-02")
+	logPath := filepath.Join(logDir, fmt.Sprintf("sender_%s.log", dateStr))
+
+	// 3. Открываем файл для дозаписи (создается, если не существует)
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open log file: %w", err)
+		return nil, fmt.Errorf("не удалось открыть файл логов: %w", err)
 	}
 
-	return &FileLogger{
-		file:   file,
-		prefix: "",
-	}, nil
-}
-
-func (l *FileLogger) Close() error {
-	return l.file.Close()
-}
-
-func (l *FileLogger) writeLog(level, message string, fields ...any) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	timestamp := time.Now().Format(time.RFC3339)
-
-	logEntry := map[string]any{
-		"timestamp": timestamp,
-		"level":     level,
-		"message":   message,
+	// 4. На Windows принудительно включаем UTF-8 в консоли (chcp 65001)
+	if runtime.GOOS == "windows" {
+		enableWindowsUTF8()
 	}
 
-	// Добавляем дополнительные поля
-	for i := 0; i < len(fields); i += 2 {
-		if i+1 < len(fields) {
-			key, ok := fields[i].(string)
-			if ok {
-				logEntry[key] = fields[i+1]
-			}
-		}
+	// 5. Создаем MultiWriter: пишет одновременно в stdout и в файл
+	multiWriter := io.MultiWriter(os.Stdout, logFile)
+
+	// 6. Настраиваем стандартный логгер Go
+	// Флаги: Ldate (дата), Ltime (время), Lmicroseconds (микросекунды), LUTC (UTC время)
+	log.SetOutput(multiWriter)
+	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
+
+	log.Printf("📝 Логирование в файл: %s", logPath)
+
+	// 7. Возвращаем функцию очистки
+	cleanup = func() {
+		logFile.Close()
 	}
 
-	jsonData, err := json.Marshal(logEntry)
-	if err != nil {
-		fmt.Fprintf(l.file, "{\"error\": \"failed to marshal log entry\", \"original_message\": \"%s\"}\n", message)
-		return
+	return cleanup, nil
+}
+
+// enableWindowsUTF8 вызывает SetConsoleOutputCP(65001) для включения UTF-8 в cmd.exe
+func enableWindowsUTF8() {
+	kernel32 := syscall.NewLazyDLL("kernel32.dll")
+	proc := kernel32.NewProc("SetConsoleOutputCP")
+
+	// 65001 = UTF-8 code page
+	ret, _, err := proc.Call(uintptr(65001))
+	if ret == 0 {
+		// Если не удалось (например, старая Windows), просто игнорируем
+		_ = err
 	}
-
-	fmt.Fprintln(l.file, string(jsonData))
-}
-
-func (l *FileLogger) Info(msg string, fields ...any) {
-	l.writeLog("INFO", msg, fields...)
-}
-
-func (l *FileLogger) Error(msg string, fields ...any) {
-	l.writeLog("ERROR", msg, fields...)
-}
-
-func (l *FileLogger) Debug(msg string, fields ...any) {
-	l.writeLog("DEBUG", msg, fields...)
-}
-
-func (l *FileLogger) Warn(msg string, fields ...any) {
-	l.writeLog("WARN", msg, fields...)
 }

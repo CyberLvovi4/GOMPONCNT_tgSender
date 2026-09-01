@@ -21,11 +21,10 @@ gotestmain.go
 test.out
 *.test
 _coverage.*
+build/
 
 # Dependencies
 vendor/
-go.mod
-go.sum
 
 # Logs and temporary files
 *.log

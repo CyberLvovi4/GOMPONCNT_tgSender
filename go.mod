@@ -19,13 +19,17 @@ require (
 	github.com/go-faster/yaml v0.4.6 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gotd/ige v0.2.2 // indirect
+	github.com/gotd/log v0.1.0 // indirect
+	github.com/gotd/log/logzap v0.1.1 // indirect
 	github.com/gotd/neo v0.1.5 // indirect
 	github.com/gotd/td v0.132.0 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
+	github.com/joho/godotenv v1.5.1 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
+	github.com/mattn/go-sqlite3 v1.14.50 // indirect
 	github.com/ncruces/go-strftime v0.1.9 // indirect
 	github.com/ogen-go/ogen v1.15.2 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
@@ -36,7 +40,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.38.0 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	go.uber.org/zap v1.27.0 // indirect
+	go.uber.org/zap v1.28.0 // indirect
 	golang.org/x/crypto v0.43.0 // indirect
 	golang.org/x/exp v0.0.0-20250106191152-7588d65b2ba8 // indirect
 	golang.org/x/mod v0.29.0 // indirect
