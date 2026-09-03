@@ -3,13 +3,11 @@ package telegram
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 )
 
-// TgWsProxyConfig отражает структуру config.json вашего tg-ws-proxy.
-// ⚠️ ВАЖНО: Проверьте ваш реальный config.json. Если поля называются иначе
-// (например, "proxy_secret" вместо "secret"), просто поправьте теги `json:"..."` ниже.
 type TgWsProxyConfig struct {
 	Host   string `json:"host"`   // Например: "127.0.0.1"
 	Port   int    `json:"port"`   // Например: 8080
@@ -30,8 +28,15 @@ func GetProxyConfig() (addr, secret string, err error) {
 		return "", "", fmt.Errorf("не удалось определить системную папку конфигурации: %w", err)
 	}
 
+	slog.Debug("config path",
+		"path", configDir,
+	)
 	// Формируем полный путь: C:\Users\Имя\AppData\Roaming\TgWsProxy\config.json
 	configPath := filepath.Join(configDir, "TgWsProxy", "config.json")
+	slog.Debug("Путь к конфигу переопределён на .\\config.json!!! Перед запуском в работу не забудь удалить это!!!")
+
+	configPath = filepath.Join(".", "config.json") //////////////////////
+	// TODO: УДАЛИТЬ ЭТУ СТРОКУ!
 
 	// 3. Читаем файл
 	data, err := os.ReadFile(configPath)

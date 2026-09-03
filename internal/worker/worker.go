@@ -2,7 +2,7 @@ package worker
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
@@ -27,14 +27,14 @@ func New(repo db.Repository, tgPool *telegram.BotPool) *Worker {
 		tgPool:      tgPool,
 		batchSize:   10,              // Обрабатывать по 10 сообщений за раз
 		pollDelay:   5 * time.Second, // Проверять очередь каждые 5 секунд
-		debugChatID: 280792996,       // Ваш ID для отладки (из условия)
+		debugChatID: 280792996,       // Ваш ID для отладки
 	}
 }
 
 // Run запускает бесконечный цикл обработки очереди.
 // Останавливается при отмене context.Context.
 func (w *Worker) Run(ctx context.Context) {
-	log.Println("🚀 Воркер запущен. Ожидание задач...")
+	slog.Info("Воркер запущен. Ожидание задач.")
 
 	// Делаем первую проверку сразу при старте, не дожидаясь tick
 	w.processBatch(ctx)
@@ -45,7 +45,7 @@ func (w *Worker) Run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("🛑 Получен сигнал остановки. Воркер завершает работу.")
+			slog.Info("Получен сигнал остановки. Воркер завершает работу.")
 			return
 		case <-ticker.C:
 			w.processBatch(ctx)
@@ -58,41 +58,53 @@ func (w *Worker) processBatch(ctx context.Context) {
 	// 1. Забираем сообщения из БД (статусы 'new' или 'test')
 	msgs, err := w.repo.FetchAndLockPending(ctx, w.batchSize)
 	if err != nil {
-		log.Printf("❌ Ошибка при получении задач из БД: %v", err)
+		slog.Error("Ошибка при получении задач из БД",
+			"err", err,
+		)
 		return
 	}
 
 	if len(msgs) == 0 {
-		//log.Println("Нет задач для обработки")
+		slog.Debug("Нет задач для обработки")
 		return // Очередь пуста, ничего не делаем
 	}
 
-	log.Printf("📦 Получено %d задач для обработки", len(msgs))
+	slog.Debug("Получены задачи для обработки",
+		"count", len(msgs),
+	)
+
 	debug_mode := os.Getenv("DEBUG_MODE")
-	if debug_mode == "1" {
-		log.Printf("режим отладки включен")
-	} else {
-		log.Printf("РАБОЧИЙ РЕЖИМ!!!")
-	}
+	// if debug_mode == "1" {
+	// 	log.Printf("режим отладки включен")
+	// } else {
+	// 	log.Printf("РАБОЧИЙ РЕЖИМ!!!")
+	// }
 
 	// 2. Обрабатываем каждое сообщение
 	for _, msg := range msgs {
-		log.Printf("получена задача %d со статусом %s", msg.ID, msg.Status)
-		//return
+		slog.Debug("Получена новая задача",
+			"msgID", msg.ID,
+			"status", msg.Status)
 
 		// 🛠️ DEBUG OVERRIDE: Если статус 'test', подменяем получателя
 		if (debug_mode == "1") || strings.EqualFold(strings.TrimSpace(msg.Status), "test") {
-			log.Printf("🔧 [DEBUG MODE] Перехват сообщения #%d. Оригинальный получатель: %d, новый: %d",
-				msg.ID, msg.ChatID, w.debugChatID)
+			slog.Info("[DEBUG MODE] Перехват сообщения",
+				"msgID", msg.ID,
+				"original_chatID", msg.ChatID,
+				"debug_chatID", w.debugChatID,
+			)
 
 			msg.ChatID = w.debugChatID
 			msg.ChatUsername = nil // Принудительно отправляем по ID, игнорируя username
 		}
 
-		// 🔄 ФОРМАТИРОВАНИЕ: 1 строка кода вместо самописного парсера!
+		// 🔄 ФОРМАТИРОВАНИЕ
 		cleanText, entities, err := formatter.ParseHTMLToTelegram(msg.MessageText)
 		if err != nil {
-			log.Printf("⚠️ Ошибка парсинга HTML для msg_id=%d: %v. Отправляем как plain text.", msg.ID, err)
+			slog.Error("Ошибка парсинга HTML. Отправляем как plain text.",
+				"msgID", msg.ID,
+				"err", err,
+			)
 			cleanText = msg.MessageText // Fallback на сырой текст
 			entities = nil
 		}
@@ -104,17 +116,29 @@ func (w *Worker) processBatch(ctx context.Context) {
 		if result.ErrCode == 0 { // 0 означает успех в нашей структуре SendResult
 			err = w.repo.MarkAsSent(ctx, msg.ID, result.TgMessageID, result.DurationMs, result.BytesSent)
 			if err != nil {
-				log.Printf("⚠️ Не удалось обновить БД (успех) для msg_id=%d: %v", msg.ID, err)
+				slog.Error("Не удалось обновить БД (успех)",
+					"msgID", msg.ID,
+					"err", err,
+				)
 			} else {
-				log.Printf("✅ Задача #%d успешно завершена и сохранена в БД", msg.ID)
+				slog.Debug("Задача успешно завершена и сохранена в БД",
+					"msgID", msg.ID,
+				)
 			}
 		} else {
 			err = w.repo.MarkAsFailed(ctx, msg.ID, result.ErrCode, result.ErrText)
 			if err != nil {
-				log.Printf("⚠️ Не удалось обновить БД (ошибка) для msg_id=%d: %v", msg.ID, err)
+				slog.Error("Не удалось обновить БД (ошибка)",
+					"msgID", msg.ID,
+					"err", err,
+				)
 			} else {
-				log.Printf("⚠️ Задача #%d помечена как failed (попытка %d/%d). Ошибка: %s",
-					msg.ID, msg.AttemptNumber+1, msg.MaxAttempts, result.ErrText)
+				slog.Info("Задача помечена как failed",
+					"msgID", msg.ID,
+					"attempt", msg.AttemptNumber+1,
+					"maxAttempts", msg.MaxAttempts,
+					"err", result.ErrText,
+				)
 			}
 		}
 

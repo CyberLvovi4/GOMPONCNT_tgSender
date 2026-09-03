@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 )
@@ -20,6 +21,15 @@ type Repository interface {
 
 	// IsDuplicate проверяет, есть ли уже такое сообщение в очереди (по хешу)
 	IsDuplicate(ctx context.Context, hash string) (bool, error)
+
+	// GetSentCount возвращает количество успешно отправленных сообщений за период
+	GetSentCount(ctx context.Context, from, to time.Time) (int, error)
+
+	// GetFailedMessages возвращает сводку по неудачным отправкам за период
+	GetFailedMessages(ctx context.Context, from, to time.Time) ([]FailedItem, error)
+
+	// сбрасывает "зависшие" задания. вызывается при старте приложения
+	ResetStuckTasks(ctx context.Context) error
 }
 
 type repository struct {
@@ -147,7 +157,7 @@ func (r *repository) MarkAsFailed(ctx context.Context, msgID int64, tgErrCode in
 	// иначе 'failed'. Также увеличиваем задержку (например, экспоненциально)
 	query := `
 		UPDATE messages 
-		SET status = CASE WHEN attempt_number < max_attempts THEN 'test' ELSE 'failed' END,
+		SET status = CASE WHEN attempt_number < max_attempts THEN 'new' ELSE 'failed' END,
 		    next_attempt_at = CASE WHEN attempt_number < max_attempts THEN ? + (attempt_number * 60) ELSE next_attempt_at END,
 		    error_text = ?,
 		    telegram_error_code = ?
@@ -163,4 +173,75 @@ func (r *repository) IsDuplicate(ctx context.Context, hash string) (bool, error)
 	query := `SELECT COUNT(1) FROM messages WHERE message_hash = ? AND status IN ('new', 'processing', 'sent')`
 	err := r.db.QueryRowContext(ctx, query, hash).Scan(&count)
 	return count > 0, err
+}
+
+// FailedItem представляет группу неудачных отправок
+type FailedItem struct {
+	Sender       string
+	ChatID       int64
+	ChatUsername *string
+	Error        string
+	Count        int
+}
+
+// GetSentCount возвращает количество успешно отправленных сообщений за период
+func (r *repository) GetSentCount(ctx context.Context, from, to time.Time) (int, error) {
+	query := `
+		SELECT COUNT(*) FROM messages 
+		WHERE status = 'sent' 
+		  AND sent_at >= ? AND sent_at < ?
+	`
+	var count int
+	err := r.db.QueryRowContext(ctx, query, from.Unix(), to.Unix()).Scan(&count)
+	return count, err
+}
+
+func (r *repository) GetFailedMessages(ctx context.Context, from, to time.Time) ([]FailedItem, error) {
+	query := `
+		SELECT sender_user_name, chat_id, chat_username, error_text, COUNT(*) as cnt
+		FROM messages 
+		WHERE status = 'failed' 
+		  AND created_at >= ? AND created_at < ?
+		  AND error_text IS NOT NULL
+		GROUP BY sender_user_name, chat_id, chat_username, error_text
+		ORDER BY cnt DESC
+		LIMIT 50
+	`
+
+	rows, err := r.db.QueryContext(ctx, query, from.Unix(), to.Unix())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []FailedItem
+	for rows.Next() {
+		var item FailedItem
+		if err := rows.Scan(&item.Sender, &item.ChatID, &item.ChatUsername, &item.Error, &item.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+
+	return items, rows.Err()
+}
+
+func (r *repository) ResetStuckTasks(ctx context.Context) error {
+	query := `
+        UPDATE messages 
+        SET status = 'new', attempt_number = attempt_number - 1
+        WHERE status = 'processing'
+    `
+	result, err := r.db.ExecContext(ctx, query)
+	if err != nil {
+		return err
+	}
+
+	if count, _ := result.RowsAffected(); count > 0 {
+		slog.Info("Сброшены зависшие задачи со статусом 'processing'",
+			"count", count,
+		)
+	}
+
+	return nil
 }

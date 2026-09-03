@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -73,11 +73,17 @@ func (m *Manager) MakeBackup() error {
 	sizeMB := float64(info.Size()) / 1024 / 1024
 
 	duration := time.Since(start)
-	log.Printf("💾 Бэкап создан: %s (%.2f МБ, за %v)", backupFileName, sizeMB, duration.Round(time.Millisecond))
+	slog.Info("Бэкап создан",
+		"fileName", backupFileName,
+		"fileSizeMB", sizeMB,
+		"elapsedMS", duration.Round(time.Millisecond),
+	)
 
 	// Удаляем старые бэкапы согласно политике хранения
 	if err := m.cleanup(); err != nil {
-		log.Printf("⚠️ Ошибка при очистке старых бэкапов: %v", err)
+		slog.Error("Ошибка при очистке старых бэкапов",
+			"err", err,
+		)
 	}
 
 	return nil
@@ -127,7 +133,9 @@ func (m *Manager) cleanup() error {
 		for _, f := range toDelete {
 			if err := os.Remove(f); err == nil {
 				deleted++
-				log.Printf("🗑️ Удален старый бэкап (по количеству): %s", filepath.Base(f))
+				slog.Info("Удален старый бэкап (по количеству)",
+					"fileName", filepath.Base(f),
+				)
 			}
 		}
 		// Обновляем список после удаления
@@ -145,14 +153,18 @@ func (m *Manager) cleanup() error {
 			if info.ModTime().Before(cutoff) {
 				if err := os.Remove(f); err == nil {
 					deleted++
-					log.Printf("🗑️ Удален старый бэкап (по возрасту): %s", filepath.Base(f))
+					slog.Info("Удален старый бэкап (по возрасту)",
+						"fileName", filepath.Base(f),
+					)
 				}
 			}
 		}
 	}
 
 	if deleted > 0 {
-		log.Printf("🧹 Очистка завершена: удалено %d старых бэкапов", deleted)
+		slog.Info("Очистка старых бэкапов завершена",
+			"fileCount", deleted,
+		)
 	}
 
 	return nil
@@ -163,7 +175,9 @@ func (m *Manager) cleanup() error {
 func (m *Manager) RunPeriodic(ctx context.Context, interval time.Duration) {
 	// Делаем первый бэкап сразу при старте
 	if err := m.MakeBackup(); err != nil {
-		log.Printf("❌ Ошибка при стартовом бэкапе: %v", err)
+		slog.Error("Ошибка при стартовом бэкапе",
+			"err", err,
+		)
 	}
 
 	ticker := time.NewTicker(interval)
@@ -172,11 +186,13 @@ func (m *Manager) RunPeriodic(ctx context.Context, interval time.Duration) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("⏹️ Периодический бэкап остановлен")
+			slog.Info("Периодический бэкап остановлен")
 			return
 		case <-ticker.C:
 			if err := m.MakeBackup(); err != nil {
-				log.Printf("❌ Ошибка при периодическом бэкапе: %v", err)
+				slog.Error("Ошибка при периодическом бэкапе",
+					"err", err,
+				)
 			}
 		}
 	}

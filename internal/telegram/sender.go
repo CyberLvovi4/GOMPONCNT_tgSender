@@ -3,7 +3,7 @@ package telegram
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	"telegram-worker/internal/db"
@@ -30,7 +30,10 @@ func (p *BotPool) SendMessage(ctx context.Context, botCode string, msg db.Messag
 	if !ok {
 		result.ErrText = fmt.Sprintf("бот с кодом '%s' не найден в конфигурации", botCode)
 		result.ErrCode = -1
-		log.Printf("❌ %s", result.ErrText)
+		slog.Error("Неизвестный бот-отправитель",
+			"err", result.ErrText,
+			"botName", botCode,
+		)
 		return result
 	}
 
@@ -47,50 +50,12 @@ func (p *BotPool) SendMessage(ctx context.Context, botCode string, msg db.Messag
 	if err != nil {
 		result.ErrText = fmt.Sprintf("не удалось резолвить peer для chat_id=%d: %v", chatID, err)
 		result.ErrCode = -1
-		log.Printf("❌ %s", result.ErrText)
+		slog.Error("Неизвестный получатель (возможно, он ещё не писал боту)",
+			"err", err,
+			"chatID", chatID,
+		)
 		return result
 	}
-
-	/////////////////////////////////////////////////////////////////////////////////////////////////////
-
-	// // 1. Преобразуем итоговый текст в UTF-16 для точного подсчета длины, как это делает Telegram
-	// utf16Encoded := utf16.Encode([]rune(cleanText))
-	// maxLen := len(utf16Encoded)
-
-	// fmt.Printf("🔍 ОТЛАДКА ГРАНИЦ:\n")
-	// fmt.Printf("Итоговый текст для отправки (длина в UTF-16): %d\n", maxLen)
-	// fmt.Printf("Содержимое текста: %q\n\n", cleanText)
-
-	// // 2. Проверяем каждую сущность
-	// for i, e := range entities {
-	// 	var offset, length int
-	// 	var typeName string
-
-	// 	switch v := e.(type) {
-	// 	case *tg.MessageEntityBold:
-	// 		offset, length = v.Offset, v.Length
-	// 		typeName = "Bold"
-	// 	case *tg.MessageEntityCode:
-	// 		offset, length = v.Offset, v.Length
-	// 		typeName = "Code"
-	// 	// Добавьте сюда другие типы, если используете (Italic, Underline, Pre и т.д.)
-	// 	default:
-	// 		continue
-	// 	}
-
-	// 	// 3. Проверка границ: смещение не может быть < 0, длина > 0,
-	// 	// а их сумма не может превышать общую длину текста в UTF-16
-	// 	if offset < 0 || length <= 0 || (offset+length) > maxLen {
-	// 		fmt.Printf("❌ ОШИБКА ГРАНИЦ в сущности #%d (%s):\n", i, typeName)
-	// 		fmt.Printf("   Offset=%d, Length=%d. Сумма (%d) > макс. длины (%d)\n", offset, length, offset+length, maxLen)
-	// 	} else {
-	// 		// Если границы в порядке, выведем текст, который попадет под выделение, для визуальной проверки
-	// 		highlightedText := string(utf16.Decode(utf16Encoded[offset : offset+length]))
-	// 		fmt.Printf("✅ Сущность #%d (%s) ОК: Offset=%d, Length=%d. Выделяемый текст: %q\n", i, typeName, offset, length, highlightedText)
-	// 	}
-	// }
-	// fmt.Println("-------------------")
-	//////////////////////////////////////////////////////////////////////////////////////////////////////
 
 	// 5. Формируем запрос на отправку
 	req := &tg.MessagesSendMessageRequest{
@@ -126,7 +91,11 @@ func (p *BotPool) SendMessage(ctx context.Context, botCode string, msg db.Messag
 			result.ErrCode = -1 // Общая ошибка сети или клиента
 		}
 
-		log.Printf("❌ Ошибка отправки (бот=%s, db_id=%d): %v", botCode, msg.ID, err)
+		slog.Error("Ошибка отправки сообщения в ТГ",
+			"botName", botCode,
+			"msgID", msg.ID,
+			"err", err,
+		)
 		return result
 	}
 
@@ -135,7 +104,11 @@ func (p *BotPool) SendMessage(ctx context.Context, botCode string, msg db.Messag
 	if sentMsg != nil {
 		result.TgMessageID = int64(sentMsg.ID)
 		result.BytesSent = len(msg.MessageText)
-		log.Printf("✅ Успешно (бот=%s): db_id=%d -> tg_msg_id=%d", botCode, msg.ID, result.TgMessageID)
+		slog.Info("Сообщение отправлено успешно",
+			"botName", botCode,
+			"chatID", msg.ChatID,
+			"msgID", msg.ID,
+		)
 	}
 
 	return result

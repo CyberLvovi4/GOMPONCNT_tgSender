@@ -6,7 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"strconv"
 	"sync"
@@ -69,7 +69,9 @@ func NewBotPool(ctx context.Context, configPath string) (*BotPool, error) {
 		return nil, fmt.Errorf("ошибка получения настроек прокси: %w", err)
 	}
 
-	log.Printf("🔌 Использование локального прокси: %s", proxyAddr)
+	slog.Info("Использование локального прокси",
+		"address", proxyAddr,
+	)
 
 	decodedSecret, err := decodeSecret(proxySecret)
 	if err != nil {
@@ -120,42 +122,53 @@ func NewBotPool(ctx context.Context, configPath string) (*BotPool, error) {
 		if err := pool.addBot(ctx, bot.Name, bot.Token); err != nil {
 			return nil, fmt.Errorf("ошибка инициализации бота %s: %w", bot.Name, err)
 		}
-		log.Printf("✅ Бот %s успешно инициализирован", bot.Name)
+		slog.Info("Бот успешно инициализирован",
+			"name", bot.Name,
+		)
 	}
 
 	return pool, nil
 }
 
 func (p *BotPool) addBot(ctx context.Context, botCode, token string) error {
-
-	// // 1. Настраиваем zap на уровень Debug
-	// config := zap.NewDevelopmentConfig()
-	// config.Level = zap.NewAtomicLevelAt(zap.DebugLevel)
-	// logger1, err := config.Build()
-	// if err != nil {
-	// 	panic(err)
-	// }
-
-	client, err := gotgproto.NewClient(
-		p.appID,
-		p.appHash,
-		gotgproto.ClientTypeBot(token),
-		&gotgproto.ClientOpts{
-			Session:          sessionMaker.SqlSession(sqlite.Open(fmt.Sprintf("./sessions/%s.db", botCode))),
-			Resolver:         p.resolver,
-			DisableCopyright: true,
-			// Logger:           logger1,
-		},
-	)
-	if err != nil {
-		return fmt.Errorf("ошибка создания клиента: %w", err)
+	// Структура для передачи результата из горутины
+	type result struct {
+		client *gotgproto.Client
+		err    error
 	}
 
-	p.mu.Lock()
-	p.clients[botCode] = client
-	p.mu.Unlock()
+	ch := make(chan result, 1)
 
-	return nil
+	// Запускаем NewClient в отдельной горутине
+	go func() {
+		client, err := gotgproto.NewClient(
+			p.appID,
+			p.appHash,
+			gotgproto.ClientTypeBot(token),
+			&gotgproto.ClientOpts{
+				Session:          sessionMaker.SqlSession(sqlite.Open(fmt.Sprintf("./sessions/%s.db", botCode))),
+				Resolver:         p.resolver,
+				DisableCopyright: true,
+			},
+		)
+		ch <- result{client, err}
+	}()
+
+	// Ждём либо результата, либо отмены через контекст
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("инициализация бота %s отменена: %w", botCode, ctx.Err())
+	case res := <-ch:
+		if res.err != nil {
+			return fmt.Errorf("ошибка создания клиента %s: %w", botCode, res.err)
+		}
+
+		p.mu.Lock()
+		p.clients[botCode] = res.client
+		p.mu.Unlock()
+
+		return nil
+	}
 }
 
 func (p *BotPool) GetClient(botCode string) (*gotgproto.Client, bool) {
@@ -179,11 +192,13 @@ func (p *BotPool) Close() {
 	defer p.mu.Unlock()
 
 	for botCode, client := range p.clients {
-		log.Printf("⏹️ Остановка бота %s...", botCode)
+		slog.Info("Остановка бота",
+			"name", botCode,
+		)
 		// Вызываем встроенный метод gotgproto для корректного отключения
 		client.Stop()
 	}
-	log.Println("👋 Все боты остановлены, сессии сохранены.")
+	slog.Info("Все боты остановлены, сессии сохранены.")
 }
 
 // decodeSecret decodes an MTProxy secret that can be either hex-encoded (the
@@ -198,5 +213,5 @@ func decodeSecret(s string) ([]byte, error) {
 	if b, err := base64.URLEncoding.DecodeString(s); err == nil {
 		return b, nil
 	}
-	return nil, errors.Errorf("unable to decode secret %q as hex or base64url", s)
+	return nil, errors.Errorf("Невозможно декодировать secret %q как hex или base64url", s)
 }
